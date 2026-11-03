@@ -1,0 +1,45 @@
+{
+  "name": "@zenextia/cli",
+  "version": "0.1.0",
+  "description": "Deploy Zenextia AI Factory applications from source.",
+  "keywords": [
+    "zenextia",
+    "ai-factory",
+    "cli",
+    "deploy",
+    "mcp"
+  ],
+  "homepage": "https://github.com/zenextia/cli#readme",
+  "bugs": {
+    "url": "https://github.com/zenextia/cli/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zenextia/cli.git"
+  },
+  "license": "MIT",
+  "author": "Zenextia",
+  "type": "module",
+  "bin": {
+    "zenextia": "bin/zenextia.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
