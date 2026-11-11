@@ -1,6 +1,6 @@
 {
   "name": "@zenextia/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Deploy Zenextia AI Factory applications from source.",
   "keywords": [
     "zenextia",
@@ -36,7 +36,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "docs": "node scripts/docs.js"
   },
   "publishConfig": {
     "access": "public",
