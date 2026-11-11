@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 
+import { readProject } from './archive.js';
 import { openBrowser as defaultOpenBrowser } from './browser.js';
+import { OUTPUT_DIRECTORY, checkBuild, fetchRules } from './check.js';
 import { deploy, pollStatus, phaseOf, requireTools, resolveInstallation, TOOLS } from './deploy.js';
 import { CliError, EXIT, usageError } from './errors.js';
 import { PRODUCTION_API, apiOrigin } from './http.js';
 import { McpClient } from './mcp.js';
-import { accessToken, login, mcpUrl } from './oauth.js';
+import { accessToken, login, loginWithCode, mcpUrl } from './oauth.js';
 import { Store, configDir } from './store.js';
 import { createUi, describeStatus, formatBytes } from './ui.js';
 
@@ -16,8 +18,9 @@ export const VERSION = JSON.parse(
 const HELP = `zenextia ${VERSION} — déployer une application AI Factory sur Zenextia
 
 Usage :
-  zenextia login   [--api <url>] [--no-browser]
+  zenextia login   [--api <url>] [--no-browser | --code]
   zenextia logout  [--api <url>]
+  zenextia check   [dossier] [--api <url>]
   zenextia deploy  [dossier] [--api <url>] [--no-wait] [--timeout <minutes>]
   zenextia status  [dossier | --installation <id>] [--version-id <id>] [--api <url>]
 
@@ -38,6 +41,7 @@ const OPTIONS = {
   '--version': 'boolean',
   '-v': 'boolean',
   '--no-browser': 'boolean',
+  '--code': 'boolean',
   '--no-wait': 'boolean',
   '--timeout': 'string',
   '--installation': 'string',
@@ -45,8 +49,9 @@ const OPTIONS = {
 };
 
 const COMMAND_OPTIONS = {
-  login: ['--api', '--no-browser'],
+  login: ['--api', '--no-browser', '--code'],
   logout: ['--api'],
+  check: ['--api'],
   deploy: ['--api', '--no-wait', '--timeout'],
   status: ['--api', '--installation', '--version-id'],
 };
@@ -102,6 +107,7 @@ export async function run(argv, deps = {}) {
     retryDelayMs,
     loginTimeoutMs,
     now = Date.now,
+    sleep,
   } = deps;
 
   const json = argv.includes('--json');
@@ -122,13 +128,15 @@ export async function run(argv, deps = {}) {
 
     const origin = apiOrigin(options['--api'] || env.ZENEXTIA_API || PRODUCTION_API);
     const store = new Store(configDir(env));
-    const context = { ui, origin, store, options, args, openBrowser, pollIntervalMs, retryDelayMs, loginTimeoutMs, now };
+    const context = { ui, origin, store, options, args, openBrowser, pollIntervalMs, retryDelayMs, loginTimeoutMs, now, sleep };
 
     switch (command) {
       case 'login':
         return await loginCommand(context);
       case 'logout':
         return logoutCommand(context);
+      case 'check':
+        return await checkCommand(context);
       case 'deploy':
         return await deployCommand(context);
       case 'status':
@@ -154,9 +162,22 @@ function mcpClient({ origin, store, now }) {
   });
 }
 
-async function loginCommand({ ui, origin, store, options, openBrowser, loginTimeoutMs, now }) {
+async function loginCommand({ ui, origin, store, options, openBrowser, loginTimeoutMs, now, sleep }) {
+  if (options['--code'] && options['--no-browser']) {
+    throw usageError('--code et --no-browser ne vont pas ensemble : --code n\'ouvre jamais de navigateur.');
+  }
   if (!ui.json) ui.say(`Connexion à ${origin}…`);
-  const tokens = await login({
+  const tokens = options['--code'] ? await loginWithCode({
+    origin,
+    store,
+    now,
+    sleep,
+    onCode: ({ userCode, verificationUri, verificationUriComplete, expiresIn }) => {
+      ui.notice(`Sur n'importe quel appareil, ouvrez ${verificationUri} et saisissez le code : ${userCode}`);
+      if (verificationUriComplete) ui.notice(`Ou ouvrez directement : ${verificationUriComplete}`);
+      ui.notice(`Le code expire dans ${Math.round(expiresIn / 60)} minutes. Choisissez le Workspace puis autorisez l'accès ; la CLI attend.`);
+    },
+  }) : await login({
     origin,
     store,
     timeoutMs: loginTimeoutMs,
@@ -228,6 +249,27 @@ function timeoutMinutes(value) {
   const minutes = Number(value);
   if (!Number.isFinite(minutes) || minutes <= 0) throw usageError('--timeout attend un nombre de minutes positif.');
   return minutes;
+}
+
+async function checkCommand({ ui, origin, args }) {
+  if (args.length > 1) throw usageError('Un seul dossier de projet est attendu.');
+  const project = readProject(args[0] || '.');
+  const { rules, source } = await fetchRules(origin);
+  if (source === 'embedded') ui.say(`Règles de ${origin} injoignables : contrôle avec la copie fournie par la CLI.`);
+  const report = checkBuild(project.root, project.manifest, rules);
+  for (const item of report.problems) ui.say(`Refusé · ${item.path} : ${item.message}`);
+  for (const item of report.warnings) ui.say(`Attention · ${item.path} : ${item.message}`);
+  const ok = report.problems.length === 0;
+  ui.say(
+    ok
+      ? `${OUTPUT_DIRECTORY}/ est prêt : ${report.files} fichiers, ${formatBytes(report.bytes)}${report.warnings.length ? `, ${report.warnings.length} point(s) d'attention` : ''}. Lancez « zenextia deploy ».`
+      : `${report.problems.length} problème(s) : corrigez-les puis relancez « npm run build » et « zenextia check ».`,
+  );
+  if (!ok && !ui.json) {
+    ui.say(`Fichiers acceptés : ${rules.acceptedExtensions.join(' ')}, et sans extension ${rules.noticeFiles.join(', ')}.`);
+  }
+  ui.result({ ok, rules: source, files: report.files, bytes: report.bytes, problems: report.problems, warnings: report.warnings, acceptedExtensions: rules.acceptedExtensions, noticeFiles: rules.noticeFiles });
+  return ok ? EXIT.OK : EXIT.FAILED;
 }
 
 async function deployCommand({ ui, origin, store, options, args, pollIntervalMs, retryDelayMs, now }) {
