@@ -81,6 +81,9 @@ export async function startFakeBackend(options = {}) {
     structuredContent: options.structuredContent ?? true,
     accessTtl: options.accessTtl ?? 3600,
     deny: options.deny ?? false,
+    // Device sign-in: what the member does after `polls` pending answers.
+    device: options.device ?? { decision: 'approve', polls: 1 },
+    devices: new Map(),
     tools: options.tools ?? ALL_TOOLS,
     completeFailures: options.completeFailures ?? 1,
     statuses: options.statuses ?? DEFAULT_STATUSES,
@@ -129,7 +132,8 @@ export async function startFakeBackend(options = {}) {
         token_endpoint: `${base}/mcp/oauth/token`,
         registration_endpoint: `${base}/mcp/oauth/register`,
         response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code', 'refresh_token'],
+        grant_types_supported: ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:device_code'],
+        ...(options.withoutDevice ? {} : { device_authorization_endpoint: `${base}/mcp/oauth/device_authorization` }),
         token_endpoint_auth_methods_supported: ['none'],
         code_challenge_methods_supported: ['S256'],
         scopes_supported: ['mcp:tools'],
@@ -138,6 +142,7 @@ export async function startFakeBackend(options = {}) {
     if (request.method === 'POST' && path === '/mcp/oauth/register') return register(request, response);
     if (request.method === 'GET' && path === '/mcp/oauth/authorize') return authorize(response, url);
     if (request.method === 'POST' && path === '/mcp/oauth/token') return token(request, response);
+    if (request.method === 'POST' && path === '/mcp/oauth/device_authorization') return deviceAuthorization(request, response);
     if (path === '/mcp') return mcp(request, response);
     if (request.method === 'PUT' && path.startsWith('/upload/')) return upload(request, response, path.slice(8));
     return sendJson(response, 404, { error: 'not_found' });
@@ -217,6 +222,21 @@ export async function startFakeBackend(options = {}) {
     };
   }
 
+  async function deviceAuthorization(request, response) {
+    const form = Object.fromEntries(new URLSearchParams((await readBody(request)).toString('utf8')));
+    if (!state.clients.has(form.client_id)) return sendJson(response, 401, { error: 'invalid_client' });
+    const deviceCode = id('mcp_device');
+    state.devices.set(deviceCode, { clientId: form.client_id, polls: 0 });
+    return sendJson(response, 200, {
+      device_code: deviceCode,
+      user_code: 'BCDF-GHJK',
+      verification_uri: `${base}/mcp/oauth/device`,
+      verification_uri_complete: `${base}/mcp/oauth/device?code=BCDF-GHJK`,
+      expires_in: 900,
+      interval: 5,
+    });
+  }
+
   async function token(request, response) {
     const form = Object.fromEntries(new URLSearchParams((await readBody(request)).toString('utf8')));
     if (!state.clients.has(form.client_id)) return sendJson(response, 401, { error: 'invalid_client' });
@@ -233,6 +253,16 @@ export async function startFakeBackend(options = {}) {
       ) {
         return sendJson(response, 400, { error: 'invalid_grant', error_description: 'TEST bad code' });
       }
+      return sendJson(response, 200, issue(form.client_id), { 'cache-control': 'no-store' });
+    }
+    if (form.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
+      const device = state.devices.get(form.device_code);
+      if (!device || device.clientId !== form.client_id) return sendJson(response, 400, { error: 'invalid_grant' });
+      device.polls += 1;
+      if (device.polls <= state.device.polls) return sendJson(response, 400, { error: 'authorization_pending' });
+      if (state.device.decision === 'deny') return sendJson(response, 400, { error: 'access_denied' });
+      if (state.device.decision === 'expire') return sendJson(response, 400, { error: 'expired_token' });
+      state.devices.delete(form.device_code);
       return sendJson(response, 200, issue(form.client_id), { 'cache-control': 'no-store' });
     }
     if (form.grant_type === 'refresh_token') {

@@ -14,6 +14,7 @@ export const CLIENT_NAME = 'Zenextia CLI';
 export const SCOPE = 'mcp:tools';
 export const CALLBACK_PATH = '/callback';
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 // Refresh a little before expiry so a request never leaves with a dying token.
 const EXPIRY_MARGIN_MS = 60 * 1000;
 
@@ -205,7 +206,7 @@ export function startLoopbackServer({ state, timeoutMs = LOGIN_TIMEOUT_MS }) {
           rejectResult(
             authError('Délai de connexion dépassé : aucune réponse du navigateur.', {
               code: 'LOGIN_TIMEOUT',
-              hint: 'Relancez « zenextia login ».',
+              hint: 'Relancez « zenextia login », ou « zenextia login --code » si le navigateur est sur une autre machine.',
             }),
           ),
         );
@@ -323,6 +324,84 @@ export async function login({ origin, store, openBrowser, onUrl, timeoutMs, now 
   });
   store.saveTokens(origin, tokens);
   return tokens;
+}
+
+/**
+ * Sign in with a code the member types in Zenextia, from any device (RFC 8628).
+ * Nothing listens on this machine: the CLI polls until the member approves.
+ */
+export async function loginWithCode({
+  origin,
+  store,
+  onCode,
+  now = Date.now,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
+  const { resource, metadata } = await discover(origin);
+  if (!metadata.device_authorization_endpoint) {
+    throw new CliError('Cette API ne propose pas encore la connexion par code.', {
+      code: 'DEVICE_LOGIN_UNAVAILABLE',
+      hint: 'Lancez « zenextia login » sans --code.',
+    });
+  }
+  let client = store.api(origin).client;
+  if (!client || client.registration_endpoint !== metadata.registration_endpoint) {
+    client = await registerClient(metadata);
+    store.saveClient(origin, client);
+  }
+  const started = await postForm(metadata.device_authorization_endpoint, {
+    client_id: client.client_id,
+    scope: SCOPE,
+    resource,
+  });
+  if (started.status !== 200 || !started.body?.device_code || !started.body?.user_code) {
+    if (started.body?.error === 'invalid_client') store.forgetClient(origin);
+    throw oauthFailure('La connexion par code', started);
+  }
+  const { device_code: deviceCode, user_code: userCode } = started.body;
+  const expiresIn = Number(started.body.expires_in) || 900;
+  onCode?.({
+    userCode,
+    verificationUri: started.body.verification_uri,
+    verificationUriComplete: started.body.verification_uri_complete || null,
+    expiresIn,
+  });
+  let wait = Math.max(1, Number(started.body.interval) || 5) * 1000;
+  const deadline = now() + expiresIn * 1000;
+  while (now() < deadline) {
+    await sleep(wait);
+    const response = await postForm(metadata.token_endpoint, {
+      grant_type: DEVICE_GRANT,
+      device_code: deviceCode,
+      client_id: client.client_id,
+    });
+    if (response.status === 200) {
+      const tokens = tokenRecord(response.body, {
+        resource,
+        tokenEndpoint: metadata.token_endpoint,
+        clientId: client.client_id,
+        now: now(),
+      });
+      store.saveTokens(origin, tokens);
+      return tokens;
+    }
+    const error = response.body?.error;
+    if (error === 'authorization_pending') continue;
+    if (error === 'slow_down') {
+      wait += 5000;
+      continue;
+    }
+    if (error === 'access_denied') {
+      throw authError('La connexion a été refusée dans Zenextia.', { code: 'LOGIN_DENIED' });
+    }
+    if (error === 'expired_token') break;
+    if (error === 'invalid_client') store.forgetClient(origin);
+    throw oauthFailure('La connexion par code', response);
+  }
+  throw authError('Le code a expiré avant d\'être validé dans Zenextia.', {
+    code: 'LOGIN_TIMEOUT',
+    hint: 'Relancez « zenextia login --code ».',
+  });
 }
 
 function notLoggedIn(origin) {

@@ -22,7 +22,8 @@ or install it once: `npm install --global @zenextia/cli`, then use `zenextia`.
 2. Connectez-vous : `zenextia login`. Le navigateur s'ouvre ; choisissez le
    Workspace puis autorisez l'accès.
 3. Dans le dossier du projet (avec `zenextia.app.json`, `package.json` et
-   `package-lock.json`) : `zenextia deploy`.
+   `package-lock.json`) : `npm run build`, puis `zenextia check` pour contrôler
+   `dist/` sur votre poste avec les règles de Zenextia, puis `zenextia deploy`.
 4. La CLI affiche l'avancement de la construction et de la vérification, puis
    le lien d'aperçu et l'étape suivante. Pour y revenir plus tard :
    `zenextia status`.
@@ -31,8 +32,9 @@ or install it once: `npm install --global @zenextia/cli`, then use `zenextia`.
 
 | Command | What it does |
 | --- | --- |
-| `zenextia login [--api <url>] [--no-browser]` | Authorise the CLI for one Workspace (OAuth in the browser). |
+| `zenextia login [--api <url>] [--no-browser \| --code]` | Authorise the CLI for one Workspace (OAuth in the browser). With `--code`, nothing listens on this machine: the CLI prints a short code and an address, the member types the code in Zenextia from any device, and the CLI waits for the approval (15 minutes at most). Use it when the CLI runs on another machine or in a container. |
 | `zenextia logout [--api <url>]` | Forget the stored tokens for that API. |
+| `zenextia check [dir]` | Check `dist/` locally with the platform's rules (accepted file types, sizes, relative paths, entrypoint, keys), listing every problem. Warns about inline scripts, `on…=` handlers and forms, which the frame does not run. Uses the rules from `--api`, or a copy shipped with the CLI when offline. Nothing is uploaded. |
 | `zenextia deploy [dir] [--no-wait] [--timeout <minutes>]` | Archive the project, upload it, then follow the build and verification (30 min by default). |
 | `zenextia status [dir \| --installation <id>] [--version-id <id>]` | Show where the last deployed version (or a given installation) stands. |
 
@@ -53,7 +55,10 @@ Global options: `--api <url>` (default `https://api.zenextia.com`, or the
 Add `--json` to any command: stdout then carries exactly one JSON document
 (`{"ok": true, ...}` or `{"ok": false, "error": {"code", "message", "hint"}}`)
 and progress stays off stdout. Only `login` needs a human, once, to approve
-the connection in the browser; the URL is printed on stderr.
+the connection in the browser; the URL is printed on stderr. An agent without a
+browser runs `zenextia login --code` and passes on the code and address printed on
+stderr. Before `deploy`, `zenextia check --json` lists every file the build would
+refuse.
 
 ## What gets uploaded
 
