@@ -15,6 +15,21 @@ npx @zenextia/cli deploy
 
 or install it once: `npm install --global @zenextia/cli`, then use `zenextia`.
 
+## Pour votre agent de code
+
+Donnez-lui cette consigne, en décrivant l'application :
+
+> Crée l'application décrite ci-dessous et publie-la sur Zenextia. Commence
+> par lancer `npx @zenextia/cli@latest init` à la racine du projet, puis lis
+> et suis le fichier ZENEXTIA.md qu'il crée.
+>
+> Application : …
+
+`init` écrit dans le projet toutes les règles : ce que Zenextia accepte, le
+fichier `zenextia.app.json`, le kit, l'identité pour votre back-end et les
+commandes d'envoi. Le même texte est lisible ici :
+[français](docs/agent-guide.fr.md) · [English](docs/agent-guide.en.md).
+
 ## Démarrage rapide (français)
 
 1. Dans Zenextia, un administrateur active **Agents IA externes**
@@ -32,6 +47,7 @@ or install it once: `npm install --global @zenextia/cli`, then use `zenextia`.
 
 | Command | What it does |
 | --- | --- |
+| `zenextia init [dir] [--lang fr\|en]` | Write `ZENEXTIA.md` at the project root: every rule a coding agent needs to build, check and send the application, with this API's commands and the platform's current file types. Run it with `@latest` so the rules match the platform. Nothing is uploaded. |
 | `zenextia login [--api <url>] [--no-browser \| --code]` | Authorise the CLI for one Workspace (OAuth in the browser). With `--code`, nothing listens on this machine: the CLI prints a short code and an address, the member types the code in Zenextia from any device, and the CLI waits for the approval (15 minutes at most). Use it when the CLI runs on another machine or in a container. |
 | `zenextia logout [--api <url>]` | Forget the stored tokens for that API. |
 | `zenextia check [dir]` | Check `dist/` locally with the platform's rules (accepted file types, sizes, relative paths, entrypoint, keys), listing every problem. Warns about inline scripts, `on…=` handlers and forms, which the frame does not run. Uses the rules from `--api`, or a copy shipped with the CLI when offline. Nothing is uploaded. |
@@ -52,6 +68,8 @@ Global options: `--api <url>` (default `https://api.zenextia.com`, or the
 
 ### For coding agents
 
+Start with `npx @zenextia/cli@latest init`: the agent then reads
+`ZENEXTIA.md` ([French](docs/agent-guide.fr.md), [English](docs/agent-guide.en.md)).
 Add `--json` to any command: stdout then carries exactly one JSON document
 (`{"ok": true, ...}` or `{"ok": false, "error": {"code", "message", "hint"}}`)
 and progress stays off stdout. Only `login` needs a human, once, to approve
@@ -101,7 +119,10 @@ Node's `fetch` ignores `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is set
 
 ```sh
 npm test
+npm run docs   # after editing src/guide/*.md
 ```
+
+`docs/agent-guide.*.md` are generated from `src/guide/` and checked by the tests.
 
 Tests use `node --test` and a fake OAuth + MCP backend (`test-support/`).
 Releases are published from `v*` tags by GitHub Actions with npm trusted

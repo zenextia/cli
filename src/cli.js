@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { readProject } from './archive.js';
 import { openBrowser as defaultOpenBrowser } from './browser.js';
 import { OUTPUT_DIRECTORY, checkBuild, fetchRules } from './check.js';
+import { GUIDE_FILE, writeAgentGuide } from './guide.js';
 import { deploy, pollStatus, phaseOf, requireTools, resolveInstallation, TOOLS } from './deploy.js';
 import { CliError, EXIT, usageError } from './errors.js';
 import { PRODUCTION_API, apiOrigin } from './http.js';
@@ -18,6 +19,7 @@ export const VERSION = JSON.parse(
 const HELP = `zenextia ${VERSION} — déployer une application AI Factory sur Zenextia
 
 Usage :
+  zenextia init    [dossier] [--api <url>] [--lang fr|en]
   zenextia login   [--api <url>] [--no-browser | --code]
   zenextia logout  [--api <url>]
   zenextia check   [dossier] [--api <url>]
@@ -46,9 +48,11 @@ const OPTIONS = {
   '--timeout': 'string',
   '--installation': 'string',
   '--version-id': 'string',
+  '--lang': 'string',
 };
 
 const COMMAND_OPTIONS = {
+  init: ['--api', '--lang'],
   login: ['--api', '--no-browser', '--code'],
   logout: ['--api'],
   check: ['--api'],
@@ -131,6 +135,8 @@ export async function run(argv, deps = {}) {
     const context = { ui, origin, store, options, args, openBrowser, pollIntervalMs, retryDelayMs, loginTimeoutMs, now, sleep };
 
     switch (command) {
+      case 'init':
+        return await initCommand(context);
       case 'login':
         return await loginCommand(context);
       case 'logout':
@@ -249,6 +255,21 @@ function timeoutMinutes(value) {
   const minutes = Number(value);
   if (!Number.isFinite(minutes) || minutes <= 0) throw usageError('--timeout attend un nombre de minutes positif.');
   return minutes;
+}
+
+async function initCommand({ ui, origin, args, options }) {
+  if (args.length > 1) throw usageError('Un seul dossier de projet est attendu.');
+  const lang = options['--lang'] || 'fr';
+  const api = origin === PRODUCTION_API ? null : origin;
+  const { rules, source } = await fetchRules(origin);
+  const file = writeAgentGuide(args[0] || '.', { lang, api, rules, version: VERSION });
+  ui.say(
+    lang === 'en'
+      ? `Rules written to ${GUIDE_FILE}. Read it all, then build, check and send the application as it says.`
+      : `Règles écrites dans ${GUIDE_FILE}. Lis-le en entier, puis construis, vérifie et envoie l'application comme il l'indique.`,
+  );
+  ui.result({ ok: true, file, lang, api: origin, rules: source });
+  return EXIT.OK;
 }
 
 async function checkCommand({ ui, origin, args }) {
