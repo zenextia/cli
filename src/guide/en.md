@@ -2,6 +2,18 @@
 
 This file holds everything needed to build the application, check it and send it to Zenextia. Read it all before you start, then follow it.
 
+## 0. Start the project
+
+If the project does not exist yet, `{{cli init}}` creates it in an empty folder: Vite + React ready for Zenextia (`base: './'`, build into `dist/`), `zenextia.app.json`, `AGENTS.md` and `CLAUDE.md`. No existing file is replaced. Choose with the options:
+
+- `--template react|vanilla|none`: the base (`none` for an existing project);
+- `--backend none|zenextia|supabase|custom`: no back-end, the kit's shared data (simple state), Supabase or your own server (a real database; the back-end checks the identity token, section 5);
+- `--supabase-url https://….supabase.co`: the origin to declare for Supabase;
+- `--method specs`: a specification in `docs/spec.md`, completed before coding and checked before sending;
+- `--name "Display name"`.
+
+The kit (shared data) holds a simple application's state: only the browser reaches it, with no server-side search, 32 KiB per record and no files. As soon as you need a real database, files or server processing, choose Supabase or your own server.
+
 ## 1. Prerequisites
 
 - Node.js 20 or later, with npm. Check with `node --version`.
