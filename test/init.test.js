@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { run } from '../src/cli.js';
@@ -82,3 +83,113 @@ for (const lang of GUIDE_LANGUAGES) {
     assert.equal(published, agentGuide({ lang }));
   });
 }
+
+// A well-started project: init scaffolds what Zenextia builds, never over an
+// existing file, and asks nothing of an agent (CTO, 2026-11-12).
+import { applicationId, scaffoldFiles, resolvePlan } from '../src/scaffold.js';
+
+const read = (root, name) => fs.readFileSync(path.join(root, name), 'utf8');
+
+async function initIn(root, extra) {
+  const stdout = sink();
+  const stderr = sink();
+  const code = await run(['init', root, '--api', OFFLINE, '--json', ...extra], {
+    stdout, stderr, env: { ZENEXTIA_CONFIG_DIR: makeProject() },
+  });
+  return { code, json: JSON.parse(stdout.text), stderr: stderr.text };
+}
+
+test('an empty folder gets a Vite + React project Zenextia can build', async () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
+  const result = await initIn(root, ['--name', 'Gestion des abonnements']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.json.template, 'react');
+  assert.equal(result.json.id, 'gestion-des-abonnements');
+  for (const name of ['package.json', 'vite.config.js', 'index.html', 'src/main.jsx', 'src/App.jsx', 'zenextia.app.json', 'AGENTS.md', 'CLAUDE.md', GUIDE_FILE]) {
+    assert.ok(fs.existsSync(path.join(root, name)), name);
+  }
+  assert.match(read(root, 'vite.config.js'), /base: '\.\/'/);
+  assert.match(read(root, 'index.html'), /src="\.\/src\/main\.jsx"/);
+  assert.equal(JSON.parse(read(root, 'package.json')).scripts.build, 'vite build');
+  const manifest = JSON.parse(read(root, 'zenextia.app.json'));
+  assert.equal(manifest.id, 'gestion-des-abonnements');
+  assert.deepEqual(manifest.permissions, []);
+  assert.match(read(root, 'CLAUDE.md'), /@AGENTS\.md/);
+  assert.match(read(root, 'AGENTS.md'), /ZENEXTIA\.md/);
+  assert.deepEqual(result.json.nextSteps.slice(0, 2), ['npm install', 'npm run build']);
+});
+
+test('Supabase: identity permission, the declared origin and a verifying function', async () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
+  const result = await initIn(root, ['--backend', 'supabase', '--supabase-url', 'https://ABCD.supabase.co/rest', '--method', 'specs']);
+  assert.equal(result.code, 0, result.stderr);
+  const manifest = JSON.parse(read(root, 'zenextia.app.json'));
+  assert.deepEqual(manifest.permissions, ['identity.read']);
+  assert.deepEqual(manifest.externalOrigins, ['https://abcd.supabase.co']);
+  const fn = read(root, 'supabase/functions/zenextia-whoami/index.ts');
+  assert.match(fn, /verifyIdentityToken/);
+  assert.match(fn, new RegExp(`apiOrigin: '${OFFLINE}'`));
+  assert.match(fn, /workspace\.id/);
+  assert.match(read(root, 'src/backend.js'), /https:\/\/abcd\.supabase\.co\/functions\/v1/);
+  assert.ok(fs.existsSync(path.join(root, 'docs/spec.md')));
+  assert.match(read(root, 'AGENTS.md'), /docs\/spec\.md/);
+  assert.ok(JSON.parse(read(root, 'package.json')).dependencies['@zenextia/app-sdk']);
+});
+
+test('Zenextia data: data permissions, an entity, and a simulation only outside Zenextia', () => {
+  const plan = resolvePlan(fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-')), { backend: 'zenextia', name: 'Notes' });
+  const files = scaffoldFiles(plan);
+  const manifest = JSON.parse(files['zenextia.app.json']);
+  assert.deepEqual(manifest.permissions, ['identity.read', 'data.read', 'data.write']);
+  assert.equal(manifest.entities[0].entityType, 'note');
+  // The simulation depends on where the app runs, never on a failed connection.
+  assert.match(files['src/zenextia.js'], /insideZenextia \? connectToPortal\(\) : createSimulatedApp/);
+  assert.doesNotMatch(files['src/zenextia.js'], /catch/);
+});
+
+test('an existing project keeps every file and gets no template', async () => {
+  const root = makeProject({ 'AGENTS.md': 'TEST mine\n' });
+  const before = read(root, 'zenextia.app.json');
+  const result = await initIn(root, []);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.json.template, 'none');
+  assert.ok(result.json.kept.includes('zenextia.app.json'));
+  assert.ok(result.json.kept.includes('AGENTS.md'));
+  assert.equal(read(root, 'zenextia.app.json'), before);
+  assert.equal(read(root, 'AGENTS.md'), 'TEST mine\n');
+  const refused = await initIn(root, ['--template', 'react']);
+  assert.equal(refused.code, 2);
+});
+
+test('bad choices are usage errors, before anything is written', async () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
+  for (const extra of [['--backend', 'firebase'], ['--template', 'vue'], ['--supabase-url', 'http://abcd.supabase.co'], ['--lang', 'de']]) {
+    const result = await initIn(root, extra);
+    assert.equal(result.code, 2, extra.join(' '));
+  }
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test('at a terminal, init asks; an agent or --yes is never asked', async () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
+  const stderr = sink();
+  const code = await run(['init', root, '--api', OFFLINE], {
+    stdout: sink(), stderr, env: { ZENEXTIA_CONFIG_DIR: makeProject() },
+    interactive: true, answers: ['TEST Matrice', '2', '2', '1'],
+  });
+  assert.equal(code, 0, stderr.text);
+  assert.match(stderr.text, /Base du projet/);
+  assert.ok(fs.existsSync(path.join(root, 'src/main.js')), 'vanilla chosen');
+  assert.deepEqual(JSON.parse(read(root, 'zenextia.app.json')).permissions, ['identity.read', 'data.read', 'data.write']);
+  const quiet = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
+  const yes = sink();
+  assert.equal(await run(['init', quiet, '--api', OFFLINE, '--yes'], { stdout: sink(), stderr: yes, env: { ZENEXTIA_CONFIG_DIR: makeProject() }, interactive: true, answers: [] }), 0);
+  assert.doesNotMatch(yes.text, /Base du projet/);
+});
+
+test('the application id follows the manifest rule', () => {
+  assert.equal(applicationId('Matrice des priorités'), 'matrice-des-priorites');
+  assert.equal(applicationId('2026 Éditeur PDF!'), 'editeur-pdf');
+  assert.equal(applicationId('***'), 'mon-application');
+  assert.match(applicationId('x'.repeat(100)), /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
+});

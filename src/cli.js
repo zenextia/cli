@@ -1,9 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { readProject } from './archive.js';
 import { openBrowser as defaultOpenBrowser } from './browser.js';
 import { OUTPUT_DIRECTORY, checkBuild, fetchRules } from './check.js';
 import { GUIDE_FILE, writeAgentGuide } from './guide.js';
+import { choose, createAsker, text } from './prompt.js';
+import { resolvePlan, scaffoldFiles, writeScaffold } from './scaffold.js';
 import { deploy, pollStatus, phaseOf, requireTools, resolveInstallation, TOOLS } from './deploy.js';
 import { CliError, EXIT, usageError } from './errors.js';
 import { PRODUCTION_API, apiOrigin } from './http.js';
@@ -19,7 +22,8 @@ export const VERSION = JSON.parse(
 const HELP = `zenextia ${VERSION} — déployer une application AI Factory sur Zenextia
 
 Usage :
-  zenextia init    [dossier] [--api <url>] [--lang fr|en]
+  zenextia init    [dossier] [--template react|vanilla|none] [--backend none|zenextia|supabase|custom]
+                   [--method none|specs] [--name <nom>] [--supabase-url <url>] [--yes] [--lang fr|en]
   zenextia login   [--api <url>] [--no-browser | --code]
   zenextia logout  [--api <url>]
   zenextia check   [dossier] [--api <url>]
@@ -49,10 +53,16 @@ const OPTIONS = {
   '--installation': 'string',
   '--version-id': 'string',
   '--lang': 'string',
+  '--template': 'string',
+  '--backend': 'string',
+  '--method': 'string',
+  '--name': 'string',
+  '--supabase-url': 'string',
+  '--yes': 'boolean',
 };
 
 const COMMAND_OPTIONS = {
-  init: ['--api', '--lang'],
+  init: ['--api', '--lang', '--template', '--backend', '--method', '--name', '--supabase-url', '--yes'],
   login: ['--api', '--no-browser', '--code'],
   logout: ['--api'],
   check: ['--api'],
@@ -112,6 +122,9 @@ export async function run(argv, deps = {}) {
     loginTimeoutMs,
     now = Date.now,
     sleep,
+    stdin = process.stdin,
+    interactive,
+    answers,
   } = deps;
 
   const json = argv.includes('--json');
@@ -132,7 +145,7 @@ export async function run(argv, deps = {}) {
 
     const origin = apiOrigin(options['--api'] || env.ZENEXTIA_API || PRODUCTION_API);
     const store = new Store(configDir(env));
-    const context = { ui, origin, store, options, args, openBrowser, pollIntervalMs, retryDelayMs, loginTimeoutMs, now, sleep };
+    const context = { ui, origin, store, options, args, openBrowser, pollIntervalMs, retryDelayMs, loginTimeoutMs, now, sleep, stdin, stdout, stderr, interactive, answers };
 
     switch (command) {
       case 'init':
@@ -257,18 +270,87 @@ function timeoutMinutes(value) {
   return minutes;
 }
 
-async function initCommand({ ui, origin, args, options }) {
+/**
+ * The questions, at a terminal only: a coding agent, a pipe, --json or --yes
+ * get the options and their defaults, never a prompt that would hang.
+ */
+async function askPlan({ options, root, stdin, stderr, interactive, answers }) {
+  const chosen = {
+    template: options['--template'],
+    backend: options['--backend'],
+    method: options['--method'],
+    name: options['--name'],
+    backendUrl: options['--supabase-url'],
+    lang: options['--lang'] || 'fr',
+  };
+  const tty = interactive ?? Boolean(stdin?.isTTY && stderr?.isTTY);
+  if (!tty || options['--yes'] || options['--json']) return chosen;
+  const asker = createAsker({ input: stdin, output: stderr, answers });
+  try {
+    const existing = fs.existsSync(path.join(root, 'package.json'));
+    chosen.name ??= await text(asker, stderr, "Nom de l'application", path.basename(path.resolve(root)));
+    if (!existing && !chosen.template) {
+      chosen.template = await choose(asker, stderr, 'Base du projet', [
+        { value: 'react', label: 'Vite + React (recommandé)' },
+        { value: 'vanilla', label: 'Vite, JavaScript sans framework' },
+        { value: 'none', label: 'Aucune : je pars de mon propre projet' },
+      ], 'react');
+    }
+    chosen.backend ??= await choose(asker, stderr, 'Données et back-end', [
+      { value: 'none', label: "Aucun : l'application tient dans le navigateur" },
+      { value: 'zenextia', label: 'Données partagées chez Zenextia (kit, état simple)' },
+      { value: 'supabase', label: 'Supabase (vraie base, avec le jeton d\'identité Zenextia)' },
+      { value: 'custom', label: 'Mon propre serveur (avec le jeton d\'identité Zenextia)' },
+    ], 'none');
+    if ((chosen.backend === 'supabase' || chosen.backend === 'custom') && !chosen.backendUrl) {
+      chosen.backendUrl = (await text(asker, stderr,
+        chosen.backend === 'supabase' ? 'Adresse du projet Supabase (https://….supabase.co), vide pour plus tard' : 'Adresse du back-end (https://…), vide pour plus tard')) || undefined;
+    }
+    chosen.method ??= await choose(asker, stderr, 'Méthode de travail (BMAD ou un autre cadre : installez-le ensuite, ZENEXTIA.md reste la référence)', [
+      { value: 'none', label: 'Libre' },
+      { value: 'specs', label: "Spécification d'abord (docs/spec.md, critères d'acceptation)" },
+    ], 'none');
+  } finally {
+    asker.close();
+  }
+  return chosen;
+}
+
+async function initCommand({ ui, origin, args, options, stdin, stderr, interactive, answers }) {
   if (args.length > 1) throw usageError('Un seul dossier de projet est attendu.');
-  const lang = options['--lang'] || 'fr';
+  const root = args[0] || '.';
+  if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) {
+    throw usageError(`Le dossier ${root} est introuvable.`);
+  }
   const api = origin === PRODUCTION_API ? null : origin;
+  const plan = resolvePlan(root, await askPlan({ options, root, stdin, stderr, interactive, answers }));
+  const { created, kept } = writeScaffold(root, scaffoldFiles(plan, { api }));
   const { rules, source } = await fetchRules(origin);
-  const file = writeAgentGuide(args[0] || '.', { lang, api, rules, version: VERSION });
-  ui.say(
-    lang === 'en'
-      ? `Rules written to ${GUIDE_FILE}. Read it all, then build, check and send the application as it says.`
-      : `Règles écrites dans ${GUIDE_FILE}. Lis-le en entier, puis construis, vérifie et envoie l'application comme il l'indique.`,
-  );
-  ui.result({ ok: true, file, lang, api: origin, rules: source });
+  const file = writeAgentGuide(root, { lang: plan.lang, api, rules, version: VERSION });
+  const en = plan.lang === 'en';
+  for (const name of created) ui.say(`${en ? 'Created' : 'Créé'} · ${name}`);
+  for (const name of kept) ui.say(`${en ? 'Kept, already there' : 'Conservé, déjà présent'} · ${name}`);
+  ui.say(`${en ? 'Rules written to' : 'Règles écrites dans'} ${GUIDE_FILE}.`);
+  const nextSteps = [
+    ...(plan.template !== 'none' ? ['npm install'] : []),
+    ...(plan.backend === 'supabase' ? [en ? 'supabase functions deploy zenextia-whoami --no-verify-jwt' : 'supabase functions deploy zenextia-whoami --no-verify-jwt'] : []),
+    'npm run build',
+    `npx @zenextia/cli check${api ? ` --api ${api}` : ''}`,
+    `npx @zenextia/cli login${api ? ` --api ${api}` : ''}`,
+    `npx @zenextia/cli deploy${api ? ` --api ${api}` : ''}`,
+  ];
+  ui.say(en ? `Next: read ${GUIDE_FILE} in full, then:` : `Ensuite : lis ${GUIDE_FILE} en entier, puis :`);
+  for (const step of nextSteps) ui.say(`  ${step}`);
+  if ((plan.backend === 'supabase' || plan.backend === 'custom') && !plan.backendOrigin) {
+    ui.say(en
+      ? 'Set your back-end address in src/backend.js and its origin in zenextia.app.json > externalOrigins.'
+      : "Indique l'adresse du back-end dans src/backend.js et son origine dans zenextia.app.json > externalOrigins.");
+  }
+  ui.result({
+    ok: true, file, lang: plan.lang, api: origin, rules: source,
+    template: plan.template, backend: plan.backend, method: plan.method, id: plan.id,
+    created, kept, nextSteps,
+  });
   return EXIT.OK;
 }
 
