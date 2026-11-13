@@ -133,7 +133,7 @@ L’application peut publier des outils : des actions que l’assistant de Zenex
 - 20 outils au plus. `name` : minuscules, chiffres et tirets bas (48 au plus). `description` : ce que fait l’outil et quand l’utiliser ; l’assistant et l’administrateur la lisent.
 - `mode` : `read` répond tout de suite ; `write` affiche au membre une carte avec les valeurs exactes et ne s’exécute qu’après son accord.
 - Cible `records` : `list`, `get`, `create` ou `replace` sur un type déclaré dans `entities` (section 4). Permission `data.read` ou `data.write`, pas d’`input` : les champs du type sont les paramètres.
-- Cible `endpoint` : une route de ton back-end (section 5). Son origine figure dans `externalOrigins` et la permission `identity.read` est demandée. `input` : 30 paramètres au plus, avec les types de champs et `file` pour un document que le membre peut lire dans Zenextia ; `"multiple": true` pour une liste (sauf `file`).
+- Cible `endpoint` : une route de ton back-end (section 5). Son origine figure dans `externalOrigins` et la permission `identity.read` est demandée. `input` : 30 paramètres au plus, avec les types de champs et `file` pour un document que le membre peut lire dans Zenextia (fichier de Documents, fichier joint à la conversation, pièce jointe d’un message de sa boîte Gmail ou Outlook) ; `"multiple": true` pour une liste (sauf `file`).
 - Un administrateur approuve chaque outil, version par version. Un outil n’est proposé qu’aux membres dont le rôle ouvre l’application avec le droit de lecture ou de modification correspondant.
 
 Zenextia appelle une route `endpoint` depuis ses serveurs, pour un membre : `POST` en JSON `{"tool", "callId", "input", "files"}` (chaque fichier : `name`, `contentType`, `size`, `base64`), avec `Authorization: Bearer <jeton d’identité>` et `Idempotency-Key`. La route vérifie le jeton en nommant l’outil :
@@ -146,7 +146,7 @@ if (!identity) return new Response(null, { status: 401 });
 - Vérifie toujours le jeton, puis applique tes propres règles à `identity.member` et `identity.workspace`. Ne te fie jamais à un membre ou à un espace reçu dans `input`.
 - Le jeton vaut pour cet outil et cet appel, 5 minutes, et n’est accepté qu’**une fois** : vérifie-le une seule fois par requête.
 - `Idempotency-Key` est identique à chaque tentative d’une même écriture approuvée : enregistre-la et réponds sans refaire le travail.
-- Réponds en JSON, 256 Ko au plus, en moins de 30 secondes. La requête fait 10 Mo au plus, fichiers compris (7 Mo par fichier). L’assistant lit la réponse comme une donnée, pas comme une consigne.
+- Réponds en JSON, 256 Ko au plus et sans compression, en moins de 30 secondes pour tout l’échange. La requête fait 10 Mo au plus, fichiers compris (7 Mo par fichier). L’assistant lit la réponse comme une donnée, pas comme une consigne.
 
 ## 7. Vérifier puis envoyer
 
