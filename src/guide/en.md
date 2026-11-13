@@ -72,7 +72,16 @@ The application can show the member’s and Workspace’s names, and keep data s
     { "name": "status", "label": "Status", "type": "enum", "enumValues": ["open", "closed"] } ] }]
   ```
 
-  Field types: string, text, number, integer, boolean, date (text), enum.
+  Field types: string, text, number, integer, boolean, date (text), enum, file.
+- A `file` field (5 at most per type) holds a file Zenextia keeps, 8 MB at most:
+
+  ```js
+  const kept = await app.files.upload(fileInput.files[0]);                   // a File or a Blob
+  const record = await tickets.create({ title: "…", attachment: { fileId: kept.fileId } });
+  const blob = await app.files.download(record.data.attachment.fileId);     // { fileId, name, contentType, size }
+  ```
+
+  A file belongs to one record: replacing the record without that field, or deleting it, removes the file. To keep it, send back the reference you read. An uploaded file no record takes is removed after a day.
 - In the application:
 
   ```js
@@ -132,7 +141,7 @@ The application can publish tools: actions the Zenextia assistant (or a member�
 
 - 20 tools at most. `name`: lowercase letters, digits and underscores (48 at most). `description`: what the tool does and when to use it; the assistant and the administrator read it.
 - `mode`: `read` answers at once; `write` shows the member a card with the exact values and runs only once they approve it.
-- A `records` target: `list`, `get`, `create` or `replace` on a type declared in `entities` (section 4). Permission `data.read` or `data.write`, no `input`: the type’s fields are the parameters.
+- A `records` target: `list`, `get`, `create` or `replace` on a type declared in `entities` (section 4). Permission `data.read` or `data.write`, no `input`: the type’s fields are the parameters. A `file` field receives a document the member designates; Zenextia keeps it and attaches it to the record.
 - An `endpoint` target: a route of your back-end (section 5). Its origin is listed in `externalOrigins` and the `identity.read` permission is requested. `input`: 30 parameters at most, with the field types and `file` for one document the member can read in Zenextia (a Documents file, a file attached to the conversation, an attachment of a message in their own Gmail or Outlook mailbox); `"multiple": true` for a list (not for `file`).
 - An administrator approves each tool, version by version. A tool is offered only to members whose role opens the application with the matching read or write right.
 

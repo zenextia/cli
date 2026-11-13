@@ -72,7 +72,16 @@ L’application peut afficher le nom du membre et de l’espace, et enregistrer 
     { "name": "status", "label": "Statut", "type": "enum", "enumValues": ["open", "closed"] } ] }]
   ```
 
-  Types de champs : string, text, number, integer, boolean, date (texte), enum.
+  Types de champs : string, text, number, integer, boolean, date (texte), enum, file.
+- Un champ `file` (5 au plus par type) contient un fichier conservé par Zenextia, 8 Mo au plus :
+
+  ```js
+  const garde = await app.files.upload(champFichier.files[0]);               // File ou Blob
+  const fiche = await tickets.create({ title: "…", piece: { fileId: garde.fileId } });
+  const blob = await app.files.download(fiche.data.piece.fileId);            // { fileId, name, contentType, size }
+  ```
+
+  Un fichier appartient à un seul enregistrement : remplacer l’enregistrement sans ce champ, ou le supprimer, supprime le fichier. Pour le garder, renvoie la référence lue. Un fichier envoyé qu’aucun enregistrement ne prend est supprimé au bout d’un jour.
 - Dans l’application :
 
   ```js
@@ -132,7 +141,7 @@ L’application peut publier des outils : des actions que l’assistant de Zenex
 
 - 20 outils au plus. `name` : minuscules, chiffres et tirets bas (48 au plus). `description` : ce que fait l’outil et quand l’utiliser ; l’assistant et l’administrateur la lisent.
 - `mode` : `read` répond tout de suite ; `write` affiche au membre une carte avec les valeurs exactes et ne s’exécute qu’après son accord.
-- Cible `records` : `list`, `get`, `create` ou `replace` sur un type déclaré dans `entities` (section 4). Permission `data.read` ou `data.write`, pas d’`input` : les champs du type sont les paramètres.
+- Cible `records` : `list`, `get`, `create` ou `replace` sur un type déclaré dans `entities` (section 4). Permission `data.read` ou `data.write`, pas d’`input` : les champs du type sont les paramètres. Un champ `file` reçoit un document que le membre désigne ; Zenextia le conserve et l’attache à l’enregistrement.
 - Cible `endpoint` : une route de ton back-end (section 5). Son origine figure dans `externalOrigins` et la permission `identity.read` est demandée. `input` : 30 paramètres au plus, avec les types de champs et `file` pour un document que le membre peut lire dans Zenextia (fichier de Documents, fichier joint à la conversation, pièce jointe d’un message de sa boîte Gmail ou Outlook) ; `"multiple": true` pour une liste (sauf `file`).
 - Un administrateur approuve chaque outil, version par version. Un outil n’est proposé qu’aux membres dont le rôle ouvre l’application avec le droit de lecture ou de modification correspondant.
 
