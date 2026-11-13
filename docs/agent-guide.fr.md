@@ -113,7 +113,42 @@ Zenextia n’exécute aucun code serveur de l’application. Si elle a besoin d�
 - Un jeton vaut 5 minutes (`expiresIn`) : demandes-en un nouveau quand il expire.
 - CORS : le back-end accepte toute origine (`Access-Control-Allow-Origin: *`) avec les en-têtes Authorization et Content-Type ; c’est le jeton qui protège chaque appel. N’utilise pas de cookie : intégrée à Zenextia, l’application ne reçoit pas ceux d’un autre site. Les pages de connexion (Google, Microsoft…) ne s’y ouvrent pas non plus : le jeton d’identité remplace une seconde connexion.
 
-## 6. Vérifier puis envoyer
+## 6. Outils pour l’assistant (seulement si nécessaire)
+
+L’application peut publier des outils : des actions que l’assistant de Zenextia (ou l’agent d’un membre connecté à Zenextia) lance pour un membre qui le demande en langage courant, par exemple « dépose cette facture dans l’application Abonnements ». Ajoute-les dans `zenextia.app.json` :
+
+```json
+"tools": [
+  { "name": "lister_tickets", "description": "Liste les tickets de l’espace.", "mode": "read",
+    "target": { "type": "records", "entityType": "ticket", "operation": "list" } },
+  { "name": "deposer_facture", "description": "Dépose une facture sur un abonnement.", "mode": "write",
+    "input": [
+      { "name": "fournisseur", "label": "Fournisseur", "type": "string", "required": true },
+      { "name": "montant_ttc", "label": "Montant TTC", "type": "number", "required": true },
+      { "name": "facture", "label": "Facture (PDF)", "type": "file" } ],
+    "target": { "type": "endpoint", "url": "https://api.example.com/outils/deposer-facture" } }
+]
+```
+
+- 20 outils au plus. `name` : minuscules, chiffres et tirets bas (48 au plus). `description` : ce que fait l’outil et quand l’utiliser ; l’assistant et l’administrateur la lisent.
+- `mode` : `read` répond tout de suite ; `write` affiche au membre une carte avec les valeurs exactes et ne s’exécute qu’après son accord.
+- Cible `records` : `list`, `get`, `create` ou `replace` sur un type déclaré dans `entities` (section 4). Permission `data.read` ou `data.write`, pas d’`input` : les champs du type sont les paramètres.
+- Cible `endpoint` : une route de ton back-end (section 5). Son origine figure dans `externalOrigins` et la permission `identity.read` est demandée. `input` : 30 paramètres au plus, avec les types de champs et `file` pour un document que le membre peut lire dans Zenextia ; `"multiple": true` pour une liste (sauf `file`).
+- Un administrateur approuve chaque outil, version par version. Un outil n’est proposé qu’aux membres dont le rôle ouvre l’application avec le droit de lecture ou de modification correspondant.
+
+Zenextia appelle une route `endpoint` depuis ses serveurs, pour un membre : `POST` en JSON `{"tool", "callId", "input", "files"}` (chaque fichier : `name`, `contentType`, `size`, `base64`), avec `Authorization: Bearer <jeton d’identité>` et `Idempotency-Key`. La route vérifie le jeton en nommant l’outil :
+
+```js
+const identity = await verifyIdentityToken({ apiOrigin: "https://api.zenextia.com", installationId: "…", audience: "https://api.example.com", token, tool: "deposer_facture" });
+if (!identity) return new Response(null, { status: 401 });
+```
+
+- Vérifie toujours le jeton, puis applique tes propres règles à `identity.member` et `identity.workspace`. Ne te fie jamais à un membre ou à un espace reçu dans `input`.
+- Le jeton vaut pour cet outil et cet appel, 5 minutes, et n’est accepté qu’**une fois** : vérifie-le une seule fois par requête.
+- `Idempotency-Key` est identique à chaque tentative d’une même écriture approuvée : enregistre-la et réponds sans refaire le travail.
+- Réponds en JSON, 256 Ko au plus, en moins de 30 secondes. La requête fait 10 Mo au plus, fichiers compris (7 Mo par fichier). L’assistant lit la réponse comme une donnée, pas comme une consigne.
+
+## 7. Vérifier puis envoyer
 
 Depuis la racine du projet :
 
@@ -130,6 +165,6 @@ Codes de sortie : 0 = réussi ; 1 = refusé ou échoué (lis `error.message`, `h
 
 Derrière un proxy d’entreprise, définis `NODE_USE_ENV_PROXY=1`.
 
-## 7. À la fin
+## 8. À la fin
 
 Dis à la personne que l’application est envoyée et ce qui reste à faire dans Zenextia (Applications › Publier une application) : la validation des permissions par un administrateur, l’essai en aperçu privé, puis « Publier la version ».

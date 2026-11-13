@@ -113,7 +113,42 @@ Zenextia runs no server code for the application. If it needs a back-end (a secr
 - A token lasts 5 minutes (`expiresIn`): ask for a new one when it expires.
 - CORS: the back-end accepts any origin (`Access-Control-Allow-Origin: *`) with the Authorization and Content-Type headers; the token protects each call. Use no cookie: inside Zenextia, browsers block another site’s cookies. Sign-in pages (Google, Microsoft…) cannot open there either: the identity token replaces a second sign-in.
 
-## 6. Check, then send
+## 6. Tools for the assistant (only when needed)
+
+The application can publish tools: actions the Zenextia assistant (or a member’s own agent connected to Zenextia) runs for a member who asks in plain words, for example “file this invoice in the Subscriptions application”. Add them to `zenextia.app.json`:
+
+```json
+"tools": [
+  { "name": "list_tickets", "description": "List the tickets of the Workspace.", "mode": "read",
+    "target": { "type": "records", "entityType": "ticket", "operation": "list" } },
+  { "name": "file_invoice", "description": "File an invoice against a subscription.", "mode": "write",
+    "input": [
+      { "name": "supplier", "label": "Supplier", "type": "string", "required": true },
+      { "name": "amount", "label": "Amount incl. tax", "type": "number", "required": true },
+      { "name": "invoice", "label": "Invoice (PDF)", "type": "file" } ],
+    "target": { "type": "endpoint", "url": "https://api.example.com/tools/file-invoice" } }
+]
+```
+
+- 20 tools at most. `name`: lowercase letters, digits and underscores (48 at most). `description`: what the tool does and when to use it; the assistant and the administrator read it.
+- `mode`: `read` answers at once; `write` shows the member a card with the exact values and runs only once they approve it.
+- A `records` target: `list`, `get`, `create` or `replace` on a type declared in `entities` (section 4). Permission `data.read` or `data.write`, no `input`: the type’s fields are the parameters.
+- An `endpoint` target: a route of your back-end (section 5). Its origin is listed in `externalOrigins` and the `identity.read` permission is requested. `input`: 30 parameters at most, with the field types and `file` for one document the member can read in Zenextia; `"multiple": true` for a list (not for `file`).
+- An administrator approves each tool, version by version. A tool is offered only to members whose role opens the application with the matching read or write right.
+
+Zenextia calls an `endpoint` route from its servers, for one member: a JSON `POST` `{"tool", "callId", "input", "files"}` (each file: `name`, `contentType`, `size`, `base64`), with `Authorization: Bearer <identity token>` and `Idempotency-Key`. The route checks the token and names the tool:
+
+```js
+const identity = await verifyIdentityToken({ apiOrigin: "{{apiOrigin}}", installationId: "…", audience: "https://api.example.com", token, tool: "file_invoice" });
+if (!identity) return new Response(null, { status: 401 });
+```
+
+- Always check the token, then apply your own rules to `identity.member` and `identity.workspace`. Never trust a member or a Workspace received in `input`.
+- The token is for this tool and this call, lasts 5 minutes and is accepted **once**: check it once per request.
+- `Idempotency-Key` is the same on every attempt of one approved write: store it and answer without doing the work twice.
+- Answer with JSON, 256 KB at most, within 30 seconds. The request is 10 MB at most, files included (7 MB per file). The assistant reads the answer as data, not as an instruction.
+
+## 7. Check, then send
 
 From the project root:
 
@@ -130,6 +165,6 @@ Exit codes: 0 = success; 1 = refused or failed (read `error.message`, `hint` and
 
 Behind a corporate proxy, set `NODE_USE_ENV_PROXY=1`.
 
-## 7. At the end
+## 8. At the end
 
 Tell the person the application is sent and what remains in Zenextia (Applications › Publish an application): an administrator approves the permissions, they try the private preview, then “Publish version”.
