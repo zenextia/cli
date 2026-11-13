@@ -18,7 +18,7 @@ const VERSIONS = {
   '@vitejs/plugin-react': '^4.5.0',
   react: '^19.1.0',
   'react-dom': '^19.1.0',
-  '@zenextia/app-sdk': '^0.3.0',
+  '@zenextia/app-sdk': '^0.5.0',
 };
 
 /** The manifest id: lowercase words joined by hyphens, starting with a letter. */
@@ -225,7 +225,7 @@ function supabaseFunction(api) {
   return `// Supabase Edge Function: who is calling, as Zenextia vouches for it.
 // Deploy with \`supabase functions deploy zenextia-whoami --no-verify-jwt\` and set
 // ZENEXTIA_INSTALLATION_ID (returned by \`npx @zenextia/cli deploy --json\`).
-import { verifyIdentityToken } from 'npm:@zenextia/app-sdk@^0.3.0';
+import { verifyIdentityToken } from 'npm:@zenextia/app-sdk@^0.5.0';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
