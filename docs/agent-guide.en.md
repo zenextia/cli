@@ -57,6 +57,7 @@ The kit (shared data) holds a simple application's state: only the browser reach
 - `version`: 1.0.0 format; increase it every time you send changed content.
 - `permissions`: leave the list empty if the application needs no shared data. Otherwise, see section 4.
 - `externalOrigins`: if the application calls an external service (Supabase, a business API), list each exact origin, for example `"https://abcd.supabase.co"`: https, no path or wildcard, at most 10. An administrator approves them; data sent there leaves Zenextia. WebSockets (wss) to those origins are allowed. Put no secret key in the code: only public keys meant for browsers (such as Supabase’s “anon” key) belong there.
+- `linkOrigins`: the sites the application links to (LinkedIn, a CRM, Notion…), same form, at most 20. The application cannot open a tab itself: once an administrator approves them, Zenextia opens `target="_blank"` links, Ctrl or middle clicks and `window.open(url)` to those sites in a new tab; `openUrl(url)` from the SDK does the same from code. A site in `externalOrigins` needs no repeat. A link to an unlisted site does not open.
 - Device access, declared only when used: `device.microphone` (microphone), `device.camera` (camera), `device.screen` (screen or tab capture), `clipboard.write` (copy to the clipboard). An administrator approves them, then the browser asks the member; without approval, access stays blocked. Handle a refusal without crashing.
 
 ## 4. Shared data and identity (only when needed)
