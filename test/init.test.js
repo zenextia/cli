@@ -197,6 +197,8 @@ test('the application id follows the manifest rule', () => {
 // Found 2026-11-13: 0.6.0 documents record files and tools (SDK 0.5.0), but the
 // scaffold still pinned ^0.3.0, which for a 0.x version never reaches 0.4 or
 // later. The guide's features must exist in the SDK range a new project gets.
+// The SDK version whose features the guide documents (0.6.0: openUrl, ADR 0102).
+const SDK_DOCUMENTED = '0.6.0';
 test('a scaffolded project gets the SDK the guide documents', async () => {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'zenextia-init-'));
   const result = await initIn(root, ['--backend', 'supabase', '--supabase-url', 'https://abcd.supabase.co', '--method', 'specs']);
@@ -209,8 +211,8 @@ test('a scaffolded project gets the SDK the guide documents', async () => {
     return vMajor === 0 && vMinor === Number(minor) && vPatch >= Number(patch);
   };
   const range = JSON.parse(read(root, 'package.json')).dependencies['@zenextia/app-sdk'];
-  assert.ok(admits(range, '0.5.0'), `package.json range ${range} excludes SDK 0.5.0 (files, tools)`);
+  assert.ok(admits(range, SDK_DOCUMENTED), `package.json range ${range} excludes SDK ${SDK_DOCUMENTED}`);
   const fn = read(root, 'supabase/functions/zenextia-whoami/index.ts');
   const deno = /npm:@zenextia\/app-sdk@(\^[\d.]+)/.exec(fn)?.[1];
-  assert.ok(deno && admits(deno, '0.5.0'), `edge function range ${deno} excludes SDK 0.5.0`);
+  assert.ok(deno && admits(deno, SDK_DOCUMENTED), `edge function range ${deno} excludes SDK ${SDK_DOCUMENTED}`);
 });
