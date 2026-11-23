@@ -7,7 +7,7 @@ import { OUTPUT_DIRECTORY, checkBuild, fetchRules } from './check.js';
 import { GUIDE_FILE, writeAgentGuide } from './guide.js';
 import { choose, createAsker, text } from './prompt.js';
 import { resolvePlan, scaffoldFiles, writeScaffold } from './scaffold.js';
-import { deploy, pollStatus, phaseOf, requireTools, resolveInstallation, TOOLS } from './deploy.js';
+import { deploy, pollStatus, phaseOf, requireTools, resolveInstallation, technicalFrame, versionNameOf, TOOLS } from './deploy.js';
 import { CliError, EXIT, usageError } from './errors.js';
 import { PRODUCTION_API, apiOrigin } from './http.js';
 import { McpClient } from './mcp.js';
@@ -27,11 +27,13 @@ Usage :
   zenextia login   [--api <url>] [--no-browser | --code]
   zenextia logout  [--api <url>]
   zenextia check   [dossier] [--api <url>]
-  zenextia deploy  [dossier] [--api <url>] [--no-wait] [--timeout <minutes>]
+  zenextia deploy  [dossier] [--api <url>] [--version-name <nom>] [--no-wait] [--timeout <minutes>]
   zenextia status  [dossier | --installation <id>] [--version-id <id>] [--api <url>]
 
 Options :
   --api <url>   API Zenextia (défaut : ${PRODUCTION_API}, ou la variable ZENEXTIA_API)
+  --version-name <nom>
+                nom court donné à la version envoyée, pour la reconnaître (60 caractères au plus)
   --json        sortie JSON sur stdout, pour les agents de code et les scripts
   -h, --help    cette aide
   -v, --version version de la CLI
@@ -52,6 +54,7 @@ const OPTIONS = {
   '--timeout': 'string',
   '--installation': 'string',
   '--version-id': 'string',
+  '--version-name': 'string',
   '--lang': 'string',
   '--template': 'string',
   '--backend': 'string',
@@ -66,7 +69,7 @@ const COMMAND_OPTIONS = {
   login: ['--api', '--no-browser', '--code'],
   logout: ['--api'],
   check: ['--api'],
-  deploy: ['--api', '--no-wait', '--timeout'],
+  deploy: ['--api', '--no-wait', '--timeout', '--version-name'],
   status: ['--api', '--installation', '--version-id'],
 };
 const GLOBAL_OPTIONS = ['--json', '--help', '-h', '--version', '-v'];
@@ -316,7 +319,21 @@ async function askPlan({ options, root, stdin, stderr, interactive, answers }) {
   return chosen;
 }
 
-async function initCommand({ ui, origin, args, options, stdin, stderr, interactive, answers }) {
+/**
+ * The Workspace's technical frame for ZENEXTIA.md, when this workstation is
+ * signed in. Never a reason for `init` to fail or to ask for a sign-in.
+ */
+async function workspaceFrame({ origin, store, now, lang }) {
+  if (!store.api(origin).tokens) return null;
+  const mcp = mcpClient({ origin, store, now });
+  try {
+    return await technicalFrame(mcp, lang);
+  } finally {
+    await mcp.close().catch(() => undefined);
+  }
+}
+
+async function initCommand({ ui, origin, store, now, args, options, stdin, stderr, interactive, answers }) {
   if (args.length > 1) throw usageError('Un seul dossier de projet est attendu.');
   const root = args[0] || '.';
   if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) {
@@ -326,11 +343,17 @@ async function initCommand({ ui, origin, args, options, stdin, stderr, interacti
   const plan = resolvePlan(root, await askPlan({ options, root, stdin, stderr, interactive, answers }));
   const { created, kept } = writeScaffold(root, scaffoldFiles(plan, { api }));
   const { rules, source } = await fetchRules(origin);
-  const file = writeAgentGuide(root, { lang: plan.lang, api, rules, version: VERSION });
+  const frame = await workspaceFrame({ origin, store, now, lang: plan.lang });
+  const file = writeAgentGuide(root, { lang: plan.lang, api, rules, version: VERSION, frame });
   const en = plan.lang === 'en';
   for (const name of created) ui.say(`${en ? 'Created' : 'Créé'} · ${name}`);
   for (const name of kept) ui.say(`${en ? 'Kept, already there' : 'Conservé, déjà présent'} · ${name}`);
   ui.say(`${en ? 'Rules written to' : 'Règles écrites dans'} ${GUIDE_FILE}.`);
+  if (frame) {
+    ui.say(en
+      ? `Your Workspace's technical frame (revision ${frame.revision}) is at the end of ${GUIDE_FILE}.`
+      : `Le cadre technique de votre espace (révision ${frame.revision}) figure à la fin de ${GUIDE_FILE}.`);
+  }
   const nextSteps = [
     ...(plan.template !== 'none' ? ['npm install'] : []),
     ...(plan.backend === 'supabase' ? [en ? 'supabase functions deploy zenextia-whoami --no-verify-jwt' : 'supabase functions deploy zenextia-whoami --no-verify-jwt'] : []),
@@ -348,6 +371,7 @@ async function initCommand({ ui, origin, args, options, stdin, stderr, interacti
   }
   ui.result({
     ok: true, file, lang: plan.lang, api: origin, rules: source,
+    technicalFrame: frame ? { revision: frame.revision, rules: frame.rules.length } : null,
     template: plan.template, backend: plan.backend, method: plan.method, id: plan.id,
     created, kept, nextSteps,
   });
@@ -388,6 +412,7 @@ async function deployCommand({ ui, origin, store, options, args, pollIntervalMs,
       store,
       mcp,
       wait: !options['--no-wait'],
+      versionName: options['--version-name'],
       pollIntervalMs,
       retryDelayMs,
       timeoutMs: minutes * 60 * 1000,
@@ -395,7 +420,7 @@ async function deployCommand({ ui, origin, store, options, args, pollIntervalMs,
       hooks: {
         onArchive: (archive, project) =>
           ui.say(
-            `Archive de « ${project.manifest.id} » ${project.manifest.version} : ` +
+            `Archive de « ${project.manifest.id} » ${project.manifest.version}${options['--version-name'] ? ` « ${versionNameOf(options['--version-name'])} »` : ''} : ` +
               `${archive.entries.length} fichiers, ${formatBytes(archive.bytes)}.`,
           ),
         onPrepared: () => ui.say('Envoi des sources…'),
@@ -424,6 +449,7 @@ async function deployCommand({ ui, origin, store, options, args, pollIntervalMs,
     phase: result.phase,
     applicationId: result.applicationId,
     version: result.version,
+    versionName: result.versionName ?? null,
     installationId: result.installationId,
     versionId: result.versionId,
     uploadId: result.uploadId,

@@ -84,7 +84,11 @@ export async function startFakeBackend(options = {}) {
     // Device sign-in: what the member does after `polls` pending answers.
     device: options.device ?? { decision: 'approve', polls: 1 },
     devices: new Map(),
-    tools: options.tools ?? ALL_TOOLS,
+    // The Workspace's technical frame; its tool exists only when a frame is given.
+    frame: options.frame ?? null,
+    tools: options.tools ?? (options.frame ? [...ALL_TOOLS, 'factory_technical_frame'] : ALL_TOOLS),
+    // An API that predates version names refuses the argument it does not know.
+    versionNames: options.versionNames ?? true,
     completeFailures: options.completeFailures ?? 1,
     statuses: options.statuses ?? DEFAULT_STATUSES,
     clients: new Map(),
@@ -365,8 +369,13 @@ export async function startFakeBackend(options = {}) {
       if (!args.manifest?.id || !/^[0-9a-f]{64}$/.test(args.sourceSha256) || !(args.sourceBytes > 0)) {
         return toolError('AI_FACTORY_INVALID_INPUT', 'TEST invalid input');
       }
+      if ('versionName' in args && !state.versionNames) {
+        return toolError('AI_FACTORY_TOOL_INPUT_INVALID', 'TEST unknown argument');
+      }
+      state.prepareCalls = [...(state.prepareCalls ?? []), args];
       const prepared = {
         installationId: 'inst_TEST',
+        versionName: args.versionName ?? null,
         versionId: id('ver'),
         uploadId: id('upl'),
         manifest: args.manifest,
@@ -414,6 +423,10 @@ export async function startFakeBackend(options = {}) {
       prepared.files = Object.keys(files);
       return toolResult({ buildId: id('bld'), status: 'queued' }, opts);
     }
+    if (name === 'factory_technical_frame') {
+      state.frameCalls = [...(state.frameCalls ?? []), args];
+      return toolResult({ ...state.frame, text: state.frame.text[args.lang === 'en' ? 'en' : 'fr'] }, opts);
+    }
     if (name === 'factory_status') {
       const index = Math.min(state.statusCalls, state.statuses.length - 1);
       state.statusCalls += 1;
@@ -422,6 +435,7 @@ export async function startFakeBackend(options = {}) {
           installationId: args.installationId,
           versionId: args.versionId || 'ver_latest',
           version: '0.1.0',
+          versionName: [...state.prepared.values()].find((item) => item.versionId === args.versionId)?.versionName ?? null,
           review: { status: 'pending' },
           previewUrl: null,
           publishable: false,

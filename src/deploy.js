@@ -14,6 +14,45 @@ export const TOOLS = Object.freeze({
   status: 'factory_status',
 });
 
+// The Workspace's technical frame, read by `init`. Not in TOOLS: a deployment
+// must keep working against an API that does not offer it yet.
+export const FRAME_TOOL = 'factory_technical_frame';
+export const MAX_VERSION_NAME = 60;
+
+/**
+ * The name given to a version with `--version-name`, as the API stores it: one
+ * trimmed line of at most 60 characters. `undefined` when no name was given.
+ */
+export function versionNameOf(value) {
+  if (value === undefined || value === null) return undefined;
+  const name = String(value).split(/\s+/).filter(Boolean).join(' ');
+  // eslint-disable-next-line no-control-regex
+  if (!name || name.length > MAX_VERSION_NAME || /[\u0000-\u001f\u007f-\u009f]/.test(name)) {
+    throw usageError(`--version-name attend un nom d'une ligne, de ${MAX_VERSION_NAME} caractères au plus.`, {
+      code: 'VERSION_NAME_INVALID',
+      hint: 'Exemple : --version-name "Export PDF". Le nom se change ensuite depuis la page de la version dans Zenextia.',
+    });
+  }
+  return name;
+}
+
+/**
+ * The technical frame the Workspace's administrators set, or null when the
+ * API does not offer it, the Workspace has none, or it cannot be read now.
+ * Never an error: `init` writes its guide either way.
+ */
+export async function technicalFrame(mcp, lang = 'fr') {
+  try {
+    await mcp.connect();
+    const tools = new Set((await mcp.listTools()).map((tool) => tool.name));
+    if (!tools.has(FRAME_TOOL)) return null;
+    const frame = await mcp.callTool(FRAME_TOOL, { lang });
+    return Array.isArray(frame?.rules) && frame.rules.length && typeof frame.text === 'string' ? frame : null;
+  } catch {
+    return null;
+  }
+}
+
 const RETRYABLE_COMPLETE_CODES = new Set([
   'AI_FACTORY_UPLOAD_NOT_RECEIVED',
   'AI_FACTORY_QUARANTINE_UNAVAILABLE',
@@ -136,7 +175,9 @@ export async function pollStatus(mcp, { installationId, versionId }, options = {
  * Archive, prepare, upload, complete and (unless `wait` is false) follow the
  * build and its verification.
  */
-export async function deploy({ dir, origin, store, mcp, wait = true, hooks = {}, ...options }) {
+export async function deploy({ dir, origin, store, mcp, wait = true, hooks = {}, versionName: givenName, ...options }) {
+  // Refused before anything is archived or sent.
+  const versionName = versionNameOf(givenName);
   const project = readProject(dir);
   const archive = buildSourceArchive(project.root, options.limits);
   hooks.onArchive?.(archive, project);
@@ -144,11 +185,25 @@ export async function deploy({ dir, origin, store, mcp, wait = true, hooks = {},
   await mcp.connect();
   await requireTools(mcp, Object.values(TOOLS));
 
-  const prepared = await mcp.callTool(TOOLS.prepare, {
-    manifest: project.manifest,
-    sourceSha256: archive.sha256,
-    sourceBytes: archive.bytes,
-  });
+  let prepared;
+  try {
+    prepared = await mcp.callTool(TOOLS.prepare, {
+      manifest: project.manifest,
+      sourceSha256: archive.sha256,
+      sourceBytes: archive.bytes,
+      // Sent only when given: an API that predates version names refuses an
+      // argument it does not know.
+      ...(versionName ? { versionName } : {}),
+    });
+  } catch (error) {
+    if (versionName && error instanceof ToolError && error.code === 'AI_FACTORY_TOOL_INPUT_INVALID') {
+      throw new CliError("Cet environnement Zenextia n'accepte pas encore de nom de version.", {
+        code: 'VERSION_NAME_UNSUPPORTED',
+        hint: 'Relancez sans --version-name, puis nommez la version depuis sa page dans Zenextia.',
+      });
+    }
+    throw error;
+  }
   if (!prepared?.uploadId || !prepared?.installationId) {
     throw new CliError('Réponse de préparation invalide.', { code: 'PREPARE_INVALID_RESPONSE' });
   }
@@ -167,6 +222,7 @@ export async function deploy({ dir, origin, store, mcp, wait = true, hooks = {},
     installationId: prepared.installationId,
     versionId: prepared.versionId,
     version: project.manifest.version,
+    ...(versionName ? { versionName } : {}),
     uploadId: prepared.uploadId,
     buildId: completed?.buildId ?? null,
     sourceSha256: archive.sha256,
@@ -177,6 +233,7 @@ export async function deploy({ dir, origin, store, mcp, wait = true, hooks = {},
   const summary = {
     applicationId: project.manifest.id,
     version: project.manifest.version,
+    versionName: versionName ?? null,
     installationId: prepared.installationId,
     versionId: prepared.versionId,
     uploadId: prepared.uploadId,

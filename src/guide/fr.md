@@ -169,12 +169,15 @@ Depuis la racine du projet :
    Ouvre le navigateur : la personne choisit son espace de travail et autorise l’accès, une seule fois. Si tu ne peux pas ouvrir de navigateur (autre machine, conteneur), ajoute `--code` : donne-lui le code et le lien affichés, elle les saisit dans Zenextia depuis n’importe quel appareil ; la commande attend sa validation (15 minutes au plus).
 4. `{{cli deploy --json}}`
    Envoie le projet, puis suit la construction et les contrôles (jusqu’à 30 minutes). La sortie est un document JSON : `{"ok": true, …}` ou `{"ok": false, "error": {"code", "message", "hint"}}`.
+   Pour que la version se reconnaisse dans Zenextia, ajoute `--version-name "Export PDF"` (un nom court, 60 caractères au plus) : c’est une étiquette, elle se change ensuite depuis la page de la version.
 5. Pour connaître l’avancement plus tard : `{{cli status --json}}`
 
 Codes de sortie : 0 = réussi ; 1 = refusé ou échoué (lis `error.message`, `hint` et `build.log`, corrige et renvoie : garde la même `version` si `zenextia.app.json` n’a pas changé depuis l’échec, sinon augmente-la) ; 2 = commande ou fichier du projet incorrect ; 3 = connexion expirée ou refusée (relance `login`).
 
 Derrière un proxy d’entreprise, définis `NODE_USE_ENV_PROXY=1`.
 
+Si l’espace de travail a fixé un cadre technique (framework, langage, bibliothèques, données, hébergement du back-end), il figure à la fin de ce fichier quand `init` a été lancé après `login` ; sinon l’outil `factory_technical_frame` du connecteur Zenextia le donne. Respecte ses règles obligatoires, et dis à la personne comment l’application respecte celles qui concernent un back-end ou une base de données : Zenextia ne les voit pas.
+
 ## 8. À la fin
 
-Dis à la personne que l’application est envoyée et ce qui reste à faire dans Zenextia (Applications › Publier une application) : la validation des permissions par un administrateur, l’essai en aperçu privé, puis « Publier la version ».
+Dis à la personne que l’application est envoyée et ce qui reste à faire dans Zenextia (Applications › Gérer les applications) : la validation des permissions par un administrateur, l’essai en aperçu privé, puis « Publier la version ».

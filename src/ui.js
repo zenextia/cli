@@ -101,7 +101,7 @@ export function createUi({ stdout, stderr, json = false, now = Date.now }) {
 /** Human report of a factory_status payload. */
 export function describeStatus(ui, status, phase) {
   if (!status) return;
-  ui.say(`Version ${status.version ?? '?'} (${status.versionId ?? '?'})`);
+  ui.say(`Version ${status.version ?? '?'}${status.versionName ? ` « ${status.versionName} »` : ''} (${status.versionId ?? '?'})`);
   ui.say(`  Construction : ${label(status.build?.status)}`);
   ui.say(`  Vérification : ${label(status.verification?.status)}`);
   if (status.review?.status) ui.say(`  Revue : ${label(status.review.status)}`);
