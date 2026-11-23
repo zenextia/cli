@@ -169,12 +169,15 @@ From the project root:
    Opens the browser: the person chooses their Workspace and approves access, once. If you cannot open a browser (another machine, a container), add `--code`: give them the printed code and address, which they type in Zenextia from any device; the command waits for their approval (15 minutes at most).
 4. `{{cli deploy --json}}`
    Sends the project, then follows the build and the checks (up to 30 minutes). The output is one JSON document: `{"ok": true, …}` or `{"ok": false, "error": {"code", "message", "hint"}}`.
+   To make the version easy to recognise in Zenextia, add `--version-name "PDF export"` (a short name, at most 60 characters): it is a label, and can be changed later from the version's page.
 5. To check progress later: `{{cli status --json}}`
 
 Exit codes: 0 = success; 1 = refused or failed (read `error.message`, `hint` and `build.log`, fix and send again: keep the same `version` if `zenextia.app.json` has not changed since the failure, otherwise increase it); 2 = wrong command or project file; 3 = sign-in expired or refused (run `login` again).
 
 Behind a corporate proxy, set `NODE_USE_ENV_PROXY=1`.
 
+If the Workspace set a technical frame (framework, language, libraries, data, back-end hosting), it is at the end of this file when `init` ran after `login`; otherwise the `factory_technical_frame` tool of the Zenextia connector gives it. Follow its mandatory rules, and tell the person how the application follows the ones about a back-end or a database: Zenextia does not see those.
+
 ## 8. At the end
 
-Tell the person the application is sent and what remains in Zenextia (Applications › Publish an application): an administrator approves the permissions, they try the private preview, then “Publish version”.
+Tell the person the application is sent and what remains in Zenextia (Applications › Manage applications): an administrator approves the permissions, they try the private preview, then “Publish version”.
