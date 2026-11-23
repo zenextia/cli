@@ -10,7 +10,7 @@ import { startFakeBackend } from '../test-support/fake-backend.js';
 import { makeProject } from '../test-support/project.js';
 
 // A version carries a name, and a Workspace gives its developers a technical
-// frame (Zenextia ADR 0107).
+// frame (Zenextia ADR 0108).
 const FRAME = {
   revision: 3,
   rules: [
